@@ -7,10 +7,15 @@ const database = require('../models/connect'),
  * @param {response} res
  */
 async function createTask(req, res) {
-	const { title, description, userId } = req.body
+	const { title, description } = req.body
+	const userId = req.user
 
-	if (!title || !description || !userId) {
-		return res.status(400).json({ error: 'Todos os campos são obrigatórios' })
+	if (!title || !description) {
+		return res.status(400).json({ message: 'Todos os campos são obrigatórios' })
+	}
+
+	if (!userId) {
+		return res.status(401).json({ message: 'Usuário não autenticado' })
 	}
 
 	const result = await database.query(
@@ -26,24 +31,33 @@ async function createTask(req, res) {
  * @param {response} res
  */
 async function deleteTask(req, res) {
-	const { id } = req.body;
-  const userId = req.user;
+	const { id } = req.body
+	const userId = req.user
 
-  if (!id) {
-		return res.status(400).json({ error: 'O ID da tarefa é obrigatório' })
+	if (!id) {
+		return res.status(400).json({ message: 'O ID da tarefa é obrigatório' })
 	}
-  if (!userId) {
-    return res.status(401).json({ error: 'Usuário não autenticado' });
-  }
+	if (!userId) {
+		return res.status(401).json({ message: 'Usuário não autenticado' })
+	}
 
-  const [taskOwner] = await database.query('SELECT usuario_id FROM tarefas WHERE id = ?', [id]);
+	try {
+	const taskOwner = await getTaskOwner(id, userId)
 
-  if (!taskOwner || taskOwner[0].usuario_id != userId) {
-    return res.status(403).json({ error: 'Acesso negado' });
-  }
+	if (taskOwner.length === 0) {
+		return res.status(404).json({ message: 'Tarefa não encontrada' })
+	}	
 
-	// const result = await database.query('DELETE FROM tarefas WHERE id = ?', [id])
+	if (taskOwner[0].usuario_id != userId) {
+		return res.status(403).json({ message: 'Acesso negado' })
+	}
+
+	const result = await database.query('DELETE FROM tarefas WHERE id = ?', [id])
 	return res.status(200).json({ message: 'Tarefa deletada com sucesso' })
+	} catch (error) {
+		console.log(error)
+		res.status(500).json({ message: 'Erro interno do servidor'})
+	}
 }
 
 /**
@@ -54,7 +68,7 @@ async function deleteTask(req, res) {
 async function getTasksByUserId(req, res) {
 	const userId = req.user
 	const [result] = await database.query('SELECT * FROM tarefas WHERE usuario_id = ?', [userId])
-  
+
 	return res.status(200).json(result)
 }
 
@@ -62,21 +76,26 @@ async function getTasksByUserId(req, res) {
  * Atualiza uma tarefa existente.
  * @param {request} req
  * @param {response} res
- * @returns 
  */
-
 async function updateTask(req, res) {
 	const { id, title, description, concluido } = req.body
-  const user = req.user
+	const user = req.user
 
-  if (!user) { // teoricamente, isso nunca deve acontecer
-    return res.status(401).json({ error: 'Usuário não autenticado' })
-  }
+	if (!id) return res.status(400).json({ message: 'O ID da tarefa é obrigatório' })
 
-  const [taskOwner] = await database.query('SELECT usuario_id FROM tarefas WHERE id = ?', [id])
+	if (!user) {
+		// teoricamente, isso nunca deve acontecer pq o auth middleware garante que o usuário esteja autenticado
+		return res.status(401).json({ message: 'Usuário não autenticado' })
+	}
 
-	if (!taskOwner || taskOwner[0].usuario_id != user) {
-		return res.status(403).json({ error: 'Acesso negado' })
+	const taskOwner = await getTaskOwner(id, user)
+
+	if (taskOwner.length === 0) {
+		return res.status(404).json({ message: 'Tarefa não encontrada' })
+	}
+
+	if (taskOwner[0].usuario_id != user) {
+		return res.status(403).json({ message: 'Acesso negado' })
 	}
 
 	const fields = []
@@ -92,7 +111,7 @@ async function updateTask(req, res) {
 		values.push(description)
 	}
 
-	if (concluido) {
+	if (concluido !== undefined) {
 		fields.push('concluido = ?')
 		values.push(concluido)
 	}
@@ -108,17 +127,23 @@ async function updateTask(req, res) {
 	return res.status(200).json({ message: 'Tarefa atualizada com sucesso' })
 }
 
-async function getTaskOwner(id, userId) {
-  if (!id) {
-    throw new Error('O ID da tarefa é obrigatório');
-  }
-  if (!userId) {
-    throw new Error('O ID do usuário é obrigatório');
-  }
-  
-  const taskOwner = await database.query('SELECT usuario_id FROM tarefas WHERE id = ?', [id])
+/**
+ * Obtém o dono de uma tarefa.
+ * @param {number} taskId
+ * @param {number} userId
+ * @returns {Promise<object>}
+ */
+async function getTaskOwner(taskId, userId) {
+	if (!taskId) {
+		throw new Error('O ID da tarefa é obrigatório')
+	}
+	if (!userId) {
+		throw new Error('O ID do usuário é obrigatório')
+	}
 
-  return taskOwner
+	const [taskOwner] = await database.query('SELECT usuario_id FROM tarefas WHERE id = ?', [taskId])
+
+	return taskOwner
 }
 
 module.exports = {
