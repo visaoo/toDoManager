@@ -7,7 +7,6 @@ function checkTokenValidity(token, id) {
         console.log(decoded)
 		return decoded.userId == id
 	} catch (error) {
-        console.log(error)
 		return false
 	}
 }
